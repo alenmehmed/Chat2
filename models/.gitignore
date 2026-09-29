@@ -1,0 +1,9 @@
+# Ignore everything in this directory
+*
+
+# Except this .gitignore file itself
+!.gitignore
+
+# And the pretrain and model files
+!Chat/
+!Pretrain/

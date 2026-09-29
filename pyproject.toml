@@ -1,0 +1,35 @@
+[project]
+name = "chat2"
+version = "0.1.0"
+requires-python = ">=3.10,<3.11"
+dependencies = [
+    "torch",
+    "torchvision",
+    "torchaudio",
+    "datasets",
+    "transformers",
+    "tokenizers",
+    "evaluate",
+    "matplotlib"
+]
+
+[tool.uv.sources]
+torch = { index = "pytorch-cu118" }
+torchvision = { index = "pytorch-cu118" }
+torchaudio = { index = "pytorch-cu118" }
+
+[[tool.uv.index]]
+name = "pytorch-cu118"
+url = "https://download.pytorch.org/whl/cu118"
+explicit = true
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+]
+
+[tool.setuptools]
+packages = ["models", "testing", "training", "training.pretraining", "tokenizer", "global_info", "language_model"]
+
+[tool.uv]
+package = true 

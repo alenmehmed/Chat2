@@ -1,0 +1,15 @@
+__pycache__/
+*.pyc
+.venv/
+ 
+# models/ has it's own .gitignore 
+# training/training_plots/generated_plots/ has it's own .gitignore 
+
+.pytest_cache/
+
+uv.lock
+# chat2.egg-info/ created in uv's [tool.setuptools] section for dependancy mapping
+chat2.egg-info/ 
+
+# internal logs used by create_chat.ps1
+logs/
