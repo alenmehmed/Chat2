@@ -54,6 +54,7 @@ def pretrain():
         num_layers=MODEL_CONFIG["num_layers"],
         heads=MODEL_CONFIG["heads"],
         context_length=MODEL_CONFIG["context_length"],
+        dropout=0.0, # 1 inital epoch, nothing to overfit
         eos_token_id=tokenizer.token_to_id("<EOS>"),
     ).cuda()
 
@@ -74,7 +75,10 @@ def pretrain():
 
     lr_lambda = partial(make_lr_lambda, warmup_steps=warmup_steps, total_steps=total_steps)
 
-    optimizer = AdamW(model.parameters(), lr=PRETRAIN_CONFIG["lr"], weight_decay=PRETRAIN_CONFIG["weight_decay"])
+    decay    = [p for p in model.parameters() if p.dim() >= 2]
+    no_decay = [p for p in model.parameters() if p.dim() < 2]   # biases, LayerNorm
+    
+    optimizer = AdamW([{"params": decay, "weight_decay": 0.01}, {"params": no_decay, "weight_decay": 0.0}], lr=PRETRAIN_CONFIG["lr"], betas=(0.9, 0.95))
     scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
 
     accum_steps = PRETRAIN_CONFIG["grad_accum_steps"]

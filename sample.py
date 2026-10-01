@@ -14,6 +14,7 @@ chat = LanguageModel(
     num_layers=MODEL_CONFIG["num_layers"],
     heads=MODEL_CONFIG["heads"],
     context_length=MODEL_CONFIG["context_length"],
+    dropout=0.1,
     eos_token_id=tokenizer.token_to_id("<EOS>"),
 ).cuda()
 
@@ -24,7 +25,7 @@ while True:
     try:
         user_input = input("> ")
 
-        chat_input = f"<USR> {user_input} <BOT>" # Match the training protocol, or the model doesn't know it should reply
+        chat_input = f"<USR> {user_input} <BOT>" # Match the training protocol
 
         output = sample(chat, tokenizer, chat_input)
         

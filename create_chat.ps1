@@ -166,7 +166,7 @@ if ("$cuda".Trim() -eq 'True') {
 
 # Stage 2 - Tokenizer
 $Tokenizer = Join-Path $Root 'models\bpe.json'
-$Corpus = Join-Path $Root 'corpus.txt'
+$Corpus = Join-Path $Root 'tokenizer\corpus.txt'
 
 
 Invoke-Stage -Name 'tokenizer' `

@@ -51,6 +51,7 @@ def train():
         num_layers=MODEL_CONFIG["num_layers"],
         heads=MODEL_CONFIG["heads"],
         context_length=MODEL_CONFIG["context_length"],
+        dropout=0.1, # Prevent overfitting!
         eos_token_id=tokenizer.token_to_id("<EOS>"),
     ).cuda()
 
@@ -96,7 +97,11 @@ def train():
 
     lr_lambda = partial(make_lr_lambda, warmup_steps=warmup_steps, total_steps=total_steps)
 
-    optimizer = AdamW(model.parameters(), lr=TRAINING_CONFIG["lr"], weight_decay=TRAINING_CONFIG["weight_decay"])
+    decay    = [p for p in model.parameters() if p.dim() >= 2]
+    no_decay = [p for p in model.parameters() if p.dim() < 2]   # biases, LayerNorm
+    optimizer = AdamW([{"params": decay, "weight_decay": 0.1},
+                       {"params": no_decay, "weight_decay": 0.0}],
+                       lr=TRAINING_CONFIG["lr"], betas=(0.9, 0.95))
     scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
 
     accum_steps = TRAINING_CONFIG["grad_accum_steps"]
@@ -182,7 +187,7 @@ def train():
 
         # Held-out loss, not training loss, is what says which checkpoint to ship.
         if val_score < best_val:
-            best_val = val_score
+            best_val = val_loss
             epochs_since_best = 0
 
             torch.save(model.state_dict(), CHAT_MODELS_DIR / "model_best.pth")
@@ -190,8 +195,11 @@ def train():
         else:
             epochs_since_best += 1
 
-        # model.eval() called in sample()
+        idx = 0
         for prompt in TEST_PROMPTS:
+            idx = idx + 5
+            torch.manual_seed(123 + idx)
+            # model.eval() called in sample()
             sample(model, tokenizer, prompt=prompt)
             
         if epochs_since_best >= TRAINING_CONFIG["early_stop_patience"]:

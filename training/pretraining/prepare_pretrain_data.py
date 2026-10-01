@@ -18,13 +18,14 @@ from tokenizer.built_tokenizer_utils import load_tokenizer
 from training.collator import clean_text
 from training.utils.dialogue import extract_turns, render_dialogue
 
-RE_HTML = re.compile(r'<[^>]+>')
+RE_HTML = re.compile(r'<[^<>]{1,64}>')
 RE_WHITESPACE = re.compile(r'\s+')
 
 TOKENIZER = load_tokenizer(TOKENIZER_PATH)
 
 
 def _is_mostly_english(line: str) -> bool:
+    # >=20 chars, ascii ratio >=0.85, backslash density <0.5% (drops LaTeX)
     if len(line) < PRETRAIN_DATA_CONFIG["min_line_chars"]:
         return False
     
@@ -33,27 +34,34 @@ def _is_mostly_english(line: str) -> bool:
     return (ascii_chars / len(line)) >= PRETRAIN_DATA_CONFIG["min_ascii_ratio"]
 
 
-def _general_lines():
-    """Yields lines of the RedPajama sample sitting in corpus.txt."""
-
+def _general_docs():
+    buf = []
     with open(PRETRAIN_CORPUS_PATH, "r", encoding="utf-8") as src:
         for line in src:
             line = line.rstrip("\n")
-            if _is_mostly_english(line):
-                yield line
+
+            end = line.endswith("<EOS>")
+            buf.append(line[:-len("<EOS>")] if end else line)
+
+            if end:
+                doc, buf = " ".join(buf), []
+
+                if _is_mostly_english(doc): 
+                    yield doc
 
 
-def _dialogue_lines(config : dict):
+def _dialogue_lines(row_counter : dict):
     """Multi-turn SODA dialogues rendered into the <USR>/<BOT> protocol"""
 
-    dataset = load_dataset(config["dialogue_dataset"], split=config["dialogue_split"], streaming=True)
+    dataset = load_dataset(PRETRAIN_DATA_CONFIG["dialogue_dataset"], split=PRETRAIN_DATA_CONFIG["dialogue_split"], streaming=True)
 
     for row in dataset:
+        row_counter["rows"] += 1
         # rendered by the shared helper so pretraining and the fine-tune cannot drift into showing the model two different turn protocols
         line = render_dialogue(
             extract_turns(row),
-            min_turns=config["min_dialogue_turns"],
-            max_turns=config["max_dialogue_turns"],
+            min_turns=PRETRAIN_DATA_CONFIG["min_dialogue_turns"],
+            max_turns=PRETRAIN_DATA_CONFIG["max_dialogue_turns"],
         )
 
         if line:
@@ -92,8 +100,9 @@ def prepare():
 
     streams = {}
 
-    streams["general"] = {"gen": _general_lines(), "target": general_target, "total": 0, "lines": 0, "done": False}
-    streams["dialogue"] = {"gen": _dialogue_lines(PRETRAIN_DATA_CONFIG), "target": dialogue_target, "total": 0, "lines": 0, "done": False}
+    row_counter = {"rows" : 0}
+    streams["general"] = {"gen": _general_docs(), "target": general_target, "total": 0, "lines": 0, "done": False}
+    streams["dialogue"] = {"gen": _dialogue_lines(row_counter), "target": dialogue_target, "total": 0, "lines": 0, "done": False}
 
     print(f"General Dialogue: {dialogue_target:,}")
     print(f"Token budget: {general_target:,}")
@@ -136,6 +145,7 @@ def prepare():
         "general_tokens": streams.get("general", {}).get("total", 0),
         "dialogue_tokens": streams.get("dialogue", {}).get("total", 0),
         "dialogue_dataset": PRETRAIN_DATA_CONFIG["dialogue_dataset"] if dialogue_target > 0 else None,
+        "dialogue_rows_consumed" : row_counter["rows"]
     }
 
     with open(PRETRAIN_TOKENS_META_PATH, "w", encoding="utf-8") as f:

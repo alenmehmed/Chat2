@@ -31,7 +31,7 @@ SPECIAL_TOKENS = { # Special token config (reused in train + load)
 CHAT_DATA_CONFIG = { # Used by training/data_loader.py to build the fine-tune mix
     "dolly_dataset": "databricks/databricks-dolly-15k",
     "dolly_split": "train",
-    "dolly_repeat": 2,
+    "dolly_repeat": 1,
 
     "max_response_tokens": 128, # alpaca median response is 114
     "instruct_dataset": "yahma/alpaca-cleaned",
@@ -49,10 +49,10 @@ CHAT_DATA_CONFIG = { # Used by training/data_loader.py to build the fine-tune mi
 }
 
 PRETRAIN_DATA_CONFIG = { # Used by training/pretraining/prepare_pretrain_data.py to build the packed token file
-    "target_tokens": 600_000_000,  # 2-3hr pretrain on an RTX 2060
+    "target_tokens": 600_000_000,  # 3hr pretrain on an RTX 2060
     "min_line_chars": 20,
     "min_ascii_ratio": 0.85,
-    "batch_lines": 2000,# lines per tokenizer.encode_batch call
+    "batch_lines": 256, # lines per tokenizer.encode_batch call
     "dialogue_dataset": "allenai/soda", # Multi-turn dialogue (SODA) mixed into the pretrain stream alongside RedPajama.
     "dialogue_split": "train",
     "dialogue_fraction": 0.25,  # Fraction of target_tokens drawn from dialogue rather than general web text.
@@ -61,7 +61,7 @@ PRETRAIN_DATA_CONFIG = { # Used by training/pretraining/prepare_pretrain_data.py
 }
 
 PRETRAIN_CONFIG = { # Training values used in training/pretraining/pretrain.py
-    "lr": 3e-4,
+    "lr": 6e-4,
     "weight_decay": 1e-4,
     "epochs": 1,          # one pass over the packed token stream is already 130x Dolly's token count
     "batch_size": 8, # logit tensor at 8 x 512 x 16000 (batch_size x context_length x vocab_size)
@@ -81,7 +81,7 @@ MODEL_CONFIG = { # Model values to be passed into LanguageModel constructor in l
 TRAINING_CONFIG = { # Training values used in train() in training/train.py
     "lr": 1e-4,
     "weight_decay": 1e-4,
-    "epochs": 12,
+    "epochs": 3,
     "early_stop_patience": 3, # epochs with no new best held-out loss
     "min_lr_ratio": 0.1,
     "batch_size": 4,
@@ -94,19 +94,22 @@ TRAINING_CONFIG = { # Training values used in train() in training/train.py
 # Decoding defaults
 GENERATION_CONFIG = {
     "max_new_tokens": 140,
-    "temperature": 0.8, # Creativity not allowed!
+    "temperature": 0.7, # Creativity not allowed!
     "top_k": 24, # Cut rank 1000+
     "top_p": 0.85, # Cut rank 1000+
     "repetition_penalty": 1.05,
     "repetition_cap": 2.0,
-    "no_repeat_ngram_size": 3,
+    "no_repeat_ngram_size": 4,
 }
 
 TEST_PROMPTS = [
     "<USR> Hi! How are you doing today? <BOT>",
     "<USR> How do you stay healthy? <BOT>",
     "<USR> What is the capital of France? <BOT>",
+    "<USR> What is photosynthesis? <BOT>",
     # multi-turn: the reply has to use the earlier turn, not just the last one
     "<USR> What should I make for dinner tonight? <BOT> How about pasta? It's quick and easy. <EOS> "
     "<USR> I don't have any tomatoes though. <BOT>",
+    "<USR> How often should I exercise? <BOT> Starting out with 3 times a week is healthy. <EOS> "
+    "<USR> I'm lazy though <BOT>",
 ]

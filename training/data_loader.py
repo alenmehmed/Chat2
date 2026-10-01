@@ -1,10 +1,11 @@
 import re
 import zlib
+import json
 
 from datasets import load_dataset
 from torch.utils.data import Dataset
 
-from global_info.global_info import CHAT_DATA_CONFIG, CHAT_DIALOGUE_CACHE_PATH, TOKENIZER_PATH
+from global_info.global_info import CHAT_DATA_CONFIG, CHAT_DIALOGUE_CACHE_PATH, TOKENIZER_PATH, PRETRAIN_TOKENS_META_PATH
 from tokenizer.built_tokenizer_utils import load_tokenizer
 from training.utils.dialogue import extract_turns, render_dialogue
 
@@ -15,7 +16,7 @@ _AI_DISCLAIMER = re.compile(
     re.IGNORECASE,
 )
 
-def _load_dialogues(CHAT_DATA_CONFIG):
+def _load_dialogues():
     """Rendered multi-turn dialogues"""
     n = CHAT_DATA_CONFIG["dialogue_samples"]
     if n <= 0:
@@ -27,6 +28,10 @@ def _load_dialogues(CHAT_DATA_CONFIG):
             return cached[:n]
 
     dataset = load_dataset(CHAT_DATA_CONFIG["dialogue_dataset"], split=CHAT_DATA_CONFIG["dialogue_split"], streaming=True)
+
+    meta = json.loads(PRETRAIN_TOKENS_META_PATH.read_text(encoding="utf-8"))
+    dataset = dataset.skip(meta.get("dialogue_rows_consumed", 0)) # Skip what we already saw in pretraining
+
     rendered = []
     for row in dataset:
         line = render_dialogue(
@@ -43,7 +48,7 @@ def _load_dialogues(CHAT_DATA_CONFIG):
     CHAT_DIALOGUE_CACHE_PATH.write_text("\n".join(rendered), encoding="utf-8")
     return rendered
 
-def _load_instruct(CHAT_DATA_CONFIG):
+def _load_instruct():
     """Single-turn instruction/response rows to sit alongside Dolly."""
     n = CHAT_DATA_CONFIG["instruct_samples"]
     if n <= 0:
@@ -85,8 +90,8 @@ class ChatDataset(Dataset):
             raise ValueError(f"split must be 'train' or 'val', got {split!r}")
 
         self.dolly = load_dataset(CHAT_DATA_CONFIG["dolly_dataset"], split=CHAT_DATA_CONFIG["dolly_split"])
-        self.dialogues = _load_dialogues(CHAT_DATA_CONFIG)
-        self.instruct = _load_instruct(CHAT_DATA_CONFIG)
+        self.dialogues = _load_dialogues()
+        self.instruct = _load_instruct()
 
         tokenizer = load_tokenizer(TOKENIZER_PATH)
         cap = CHAT_DATA_CONFIG["max_response_tokens"]

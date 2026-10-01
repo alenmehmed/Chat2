@@ -5,15 +5,15 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 class TransformerBlock(nn.Module):
-    def __init__(self, embed_dim, heads, ff_mult=4):
+    def __init__(self, embed_dim, heads, dropout, ff_mult=4):
         super().__init__()
         self.norm1 = nn.LayerNorm(embed_dim)
         self.attn = nn.MultiheadAttention(embed_dim, heads, batch_first=True)
-        self.attn_dropout = nn.Dropout(0.05)
+        self.attn_dropout = nn.Dropout(dropout)
         self.ff = nn.Sequential(
             nn.Linear(embed_dim, ff_mult * embed_dim),
-            nn.ReLU(),
-            nn.Dropout(0.05),
+            nn.GELU(),
+            nn.Dropout(dropout),
             nn.Linear(ff_mult * embed_dim, embed_dim)
         )
         self.norm2 = nn.LayerNorm(embed_dim)
@@ -27,14 +27,14 @@ class TransformerBlock(nn.Module):
         return f + x
 
 class LanguageModel(nn.Module):
-    def __init__(self, vocab_size, embed_dim, num_layers, heads, context_length, eos_token_id):
+    def __init__(self, vocab_size, embed_dim, num_layers, heads, context_length, eos_token_id, dropout):
         super().__init__()
 
         self.token_emb = nn.Embedding(vocab_size, embed_dim)
         self.pos_emb = nn.Parameter(torch.randn(1, context_length, embed_dim))
-        self.emb_dropout = nn.Dropout(0.05)
+        self.emb_dropout = nn.Dropout(dropout)
         self.layers = nn.ModuleList([
-            TransformerBlock(embed_dim, heads) for _ in range(num_layers)
+            TransformerBlock(embed_dim, heads, dropout) for _ in range(num_layers)
         ])
         self.layernorm_f = nn.LayerNorm(embed_dim)
         self.head = nn.Linear(embed_dim, vocab_size, bias=False)
