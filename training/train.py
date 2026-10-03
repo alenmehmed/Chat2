@@ -18,6 +18,8 @@ from global_info.global_info import (
     TRAINING_CONFIG,
     MODEL_CONFIG,
     PRETRAIN_CHECKPOINT_PATH,
+    PRETRAIN_TOKENS_PATH,
+    PRETRAIN_TOKENS_META_PATH,
     TEST_PROMPTS
 )
 from training.data_loader import ChatDataset
@@ -28,6 +30,7 @@ from training.utils.epoch_iteration import (
     sample
 )
 from training.collator import Collator
+from training.pretraining.pretrain_dataset import PackedTokenDataset
 from tokenizer.built_tokenizer_utils import load_tokenizer
 from language_model.model import LanguageModel
 
@@ -51,7 +54,7 @@ def train():
         num_layers=MODEL_CONFIG["num_layers"],
         heads=MODEL_CONFIG["heads"],
         context_length=MODEL_CONFIG["context_length"],
-        dropout=0.1, # Prevent overfitting!
+        dropout=TRAINING_CONFIG["model_dropout"], # Prevent overfitting
         eos_token_id=tokenizer.token_to_id("<EOS>"),
     ).cuda()
 
@@ -59,7 +62,15 @@ def train():
         print(f"Loading pretrained weights from {PRETRAIN_CHECKPOINT_PATH}")
         model.load_state_dict(torch.load(PRETRAIN_CHECKPOINT_PATH, map_location="cuda"))
     else:
-        print(f"No pretrained checkpoint at {PRETRAIN_CHECKPOINT_PATH} - fine-tuning from random init") # Not recommended for Chat!
+        raise FileNotFoundError(f"Pretrained checkpoint not found at {PRETRAIN_CHECKPOINT_PATH}")
+
+    print("Sampling pre-trained model:")
+    idx = 0
+    for prompt in TEST_PROMPTS:
+        idx = idx + 5
+        torch.manual_seed(123 + idx)
+        # model.eval() called in sample()
+        sample(model, tokenizer, prompt=prompt)
 
     data = ChatDataset(split="train")
     val_data = ChatDataset(split="val")
@@ -80,15 +91,19 @@ def train():
         name: DataLoader(
             Subset(val_data, [k for k in range(len(val_data)) if val_data.source_of(k) == src]),
             batch_size=TRAINING_CONFIG["batch_size"],
-            shuffle=False,
+            shuffle=False, # No need to shuffle held-out data
             collate_fn=collate,
-            num_workers=0,
             pin_memory=True,
         )
         for src, name in ChatDataset.SOURCE_NAMES.items()
     }
 
-    print(f"train samples: {len(data):,} | held-out: {len(val_data):,}")
+    replay_iter = iter(DataLoader(
+        dataset=PackedTokenDataset(PRETRAIN_TOKENS_PATH, PRETRAIN_TOKENS_META_PATH, MODEL_CONFIG["context_length"]),
+        batch_size=TRAINING_CONFIG["batch_size"], 
+        shuffle=True, 
+        pin_memory=True
+    ))
 
     iters_per_epoch = len(loader)
 
@@ -99,7 +114,7 @@ def train():
 
     decay    = [p for p in model.parameters() if p.dim() >= 2]
     no_decay = [p for p in model.parameters() if p.dim() < 2]   # biases, LayerNorm
-    optimizer = AdamW([{"params": decay, "weight_decay": 0.1},
+    optimizer = AdamW([{"params": decay, "weight_decay": TRAINING_CONFIG["weight_decay"]},
                        {"params": no_decay, "weight_decay": 0.0}],
                        lr=TRAINING_CONFIG["lr"], betas=(0.9, 0.95))
     scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
@@ -141,10 +156,20 @@ def train():
                     logits.view(-1, vocab_size),
                     target_tensor.view(-1),
                     ignore_index=-100, # Ignore tokens of -100 in the target tensor
-                    label_smoothing=TRAINING_CONFIG["label_smoothing"],
                 ) / accum_steps
 
             scaler.scale(loss).backward()
+
+            # Replay pretraining data to prevent forgetting of general knowledge
+            # dropout of 0.1 and weight decay should be enough to prevent overfitting 
+            if i % TRAINING_CONFIG["replay_every"] == 0:
+                rx, ry = next(replay_iter)
+                
+                with autocast(device_type="cuda"):
+                    r_logits = model(rx.cuda(non_blocking=True))
+                    r_loss = F.cross_entropy(r_logits.view(-1, vocab_size), ry.cuda(non_blocking=True).view(-1))
+
+                scaler.scale(r_loss * TRAINING_CONFIG["replay_weight"] / accum_steps).backward()
 
             if (i + 1) % accum_steps == 0:
                 scaler.unscale_(optimizer) # Unscale before clipping
@@ -167,7 +192,7 @@ def train():
         val_loss, val_by_source = validate(model=model, val_loaders=val_loaders, vocab_size=vocab_size)
         val_losses.append(val_loss)
 
-        val_score = sum(val_by_source.values()) / max(len(val_by_source), 1)
+        val_score = sum(val_by_source.values()) / len(val_by_source) # Validation score is average loss among sources
         val_scores.append(val_score)
 
         print(f"[Epoch {epoch+1}]")
@@ -187,7 +212,7 @@ def train():
 
         # Held-out loss, not training loss, is what says which checkpoint to ship.
         if val_score < best_val:
-            best_val = val_loss
+            best_val = val_score
             epochs_since_best = 0
 
             torch.save(model.state_dict(), CHAT_MODELS_DIR / "model_best.pth")
@@ -195,7 +220,6 @@ def train():
         else:
             epochs_since_best += 1
 
-        idx = 0
         for prompt in TEST_PROMPTS:
             idx = idx + 5
             torch.manual_seed(123 + idx)

@@ -36,4 +36,5 @@ def load_tokenizer(path : Path):
 
 
 def detokenize(text: str) -> str:
-    return text.strip() # To be concise :-)
+    text = text.strip() # To be concise :-)
+    return text[:1].upper() + text[1:] # Capitalize the first letter

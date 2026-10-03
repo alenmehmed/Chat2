@@ -19,7 +19,14 @@ def extract_turns(row):
 
     messages = row.get("messages")
     if isinstance(messages, list) and messages and isinstance(messages[0], dict):
-        return [m.get("content", "") for m in messages]
+        # Only keep user/assistant messages which alternate
+        msgs = [m for m in messages if m.get("role") in ("user", "assistant")]
+        expected = ["user", "assistant"] * (len(msgs) // 2 + 1)
+        
+        if not msgs or [m["role"] for m in msgs] != expected[:len(msgs)]:
+            return []
+        
+        return [m.get("content", "") for m in msgs]
 
     return []
 

@@ -40,9 +40,13 @@ CHAT_DATA_CONFIG = { # Used by training/data_loader.py to build the fine-tune mi
 
     "dialogue_dataset": "allenai/soda",
     "dialogue_split": "train",
-    "dialogue_samples": 30_000,
+    "dialogue_samples": 15_000, # Served from cache (chat_dialogues.txt)
+
+    "assistant_dataset": "HuggingFaceTB/smoltalk",
+    "assistant_config": "everyday-conversations",
+    "assistant_repeat": 3,
      
-    "val_fraction": 0.02, # Deterministic holdout so training can be scored on data it never saw.
+    "val_fraction": 0.02, # Training can be scored on data it never saw.
     "split_seed": 1234,
     "min_dialogue_turns": 4,
     "max_dialogue_turns": 12,     # keep a rendered dialogue inside the 512 context
@@ -62,13 +66,13 @@ PRETRAIN_DATA_CONFIG = { # Used by training/pretraining/prepare_pretrain_data.py
 
 PRETRAIN_CONFIG = { # Training values used in training/pretraining/pretrain.py
     "lr": 6e-4,
-    "weight_decay": 1e-4,
+    "weight_decay": 0.01,
     "epochs": 1,          # one pass over the packed token stream is already 130x Dolly's token count
     "batch_size": 8, # logit tensor at 8 x 512 x 16000 (batch_size x context_length x vocab_size)
     "num_workers": 1,
     "grad_accum_steps": 4,
     "checkpoint_every": 1,
-    "label_smoothing": 0.0, # Keep it off so loss/perplexity are accurate.
+    "model_dropout" : 0.0, # 1 inital epoch, nothing to overfit
 }
 
 MODEL_CONFIG = { # Model values to be passed into LanguageModel constructor in language_model/model.py   
@@ -80,15 +84,17 @@ MODEL_CONFIG = { # Model values to be passed into LanguageModel constructor in l
 
 TRAINING_CONFIG = { # Training values used in train() in training/train.py
     "lr": 1e-4,
-    "weight_decay": 1e-4,
-    "epochs": 3,
+    "weight_decay": 0.01,
+    "epochs": 6,
     "early_stop_patience": 3, # epochs with no new best held-out loss
     "min_lr_ratio": 0.1,
     "batch_size": 4,
     "num_workers": 1,
     "grad_accum_steps": 8, # effective batch size = batch_size * grad_accum_steps = 32
     "checkpoint_every": 2,
-    "label_smoothing": 0.0,  
+    "model_dropout" : 0.1, # Prevent overfitting
+    "replay_every": 3,     # Replay pretrain data during training, ~33% more compute time per epoch
+    "replay_weight": 1.0,
 }
 
 # Decoding defaults
@@ -105,11 +111,13 @@ GENERATION_CONFIG = {
 TEST_PROMPTS = [
     "<USR> Hi! How are you doing today? <BOT>",
     "<USR> How do you stay healthy? <BOT>",
-    "<USR> What is the capital of France? <BOT>",
+    "<USR> What is the capital of France? <BOT>", # Quite useful to detect repetition
+    "<USR> What can I do to motivate myself? <BOT>",
     "<USR> What is photosynthesis? <BOT>",
     # multi-turn: the reply has to use the earlier turn, not just the last one
-    "<USR> What should I make for dinner tonight? <BOT> How about pasta? It's quick and easy. <EOS> "
+    "<USR> What should I make for dinner tonight? <BOT> How about pasta? It's quick and easy. <EOS>"
     "<USR> I don't have any tomatoes though. <BOT>",
-    "<USR> How often should I exercise? <BOT> Starting out with 3 times a week is healthy. <EOS> "
-    "<USR> I'm lazy though <BOT>",
+    "<USR> How often should I exercise? <BOT> Starting out with 3 times a week is healthy. <EOS>"
+    "<USR> I'm lazy though <BOT> You should motivate yourself to start! The first step is the hardest. <EOS>"
+    "<USR> What can I do to motivate myself? <BOT>",
 ]

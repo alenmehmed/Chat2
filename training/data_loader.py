@@ -19,6 +19,7 @@ _AI_DISCLAIMER = re.compile(
 def _load_dialogues():
     """Rendered multi-turn dialogues"""
     n = CHAT_DATA_CONFIG["dialogue_samples"]
+
     if n <= 0:
         return []
 
@@ -51,12 +52,23 @@ def _load_dialogues():
 def _load_instruct():
     """Single-turn instruction/response rows to sit alongside Dolly."""
     n = CHAT_DATA_CONFIG["instruct_samples"]
+
     if n <= 0:
         return []
 
     dataset = load_dataset(CHAT_DATA_CONFIG["instruct_dataset"], split=CHAT_DATA_CONFIG["instruct_split"])
     return dataset.select(range(min(n, len(dataset))))
 
+def _load_assistant_chats():
+    name = CHAT_DATA_CONFIG.get("assistant_dataset")
+
+    if not name:
+        return []
+    
+    dataset = load_dataset(name, CHAT_DATA_CONFIG["assistant_config"], split="train")
+    rendered = (render_dialogue(extract_turns(row), min_turns=2,
+                                max_turns=CHAT_DATA_CONFIG["max_dialogue_turns"]) for row in dataset)
+    return [line for line in rendered if line]
 
 def _keep_rows(responses, max_tokens, tokenizer, contexts=None):
     """Row indices which read like a conversational reply"""
@@ -82,8 +94,8 @@ def _in_val(source, row):
 
 class ChatDataset(Dataset):
     """Answer-shaped instruction data (Dolly + Alpaca) plus multi-turn SODA dialogues, all rendered as USR/BOT turns."""
-    SRC_DOLLY, SRC_DIALOGUE, SRC_INSTRUCT = 0, 1, 2
-    SOURCE_NAMES = {SRC_DOLLY: "dolly", SRC_DIALOGUE: "soda", SRC_INSTRUCT: "alpaca"}
+    SRC_DOLLY, SRC_DIALOGUE, SRC_INSTRUCT, SRC_ASSISTANT = 0, 1, 2, 3
+    SOURCE_NAMES = {SRC_DOLLY: "dolly", SRC_DIALOGUE: "soda", SRC_INSTRUCT: "alpaca", SRC_ASSISTANT: "smol"}
 
     def __init__(self, split="train"):
         if split not in ("train", "val"):
@@ -92,6 +104,7 @@ class ChatDataset(Dataset):
         self.dolly = load_dataset(CHAT_DATA_CONFIG["dolly_dataset"], split=CHAT_DATA_CONFIG["dolly_split"])
         self.dialogues = _load_dialogues()
         self.instruct = _load_instruct()
+        self.assistant_chats = _load_assistant_chats()
 
         tokenizer = load_tokenizer(TOKENIZER_PATH)
         cap = CHAT_DATA_CONFIG["max_response_tokens"]
@@ -107,16 +120,18 @@ class ChatDataset(Dataset):
             [(self.SRC_DOLLY, i) for i in dolly_rows]
             + [(self.SRC_DIALOGUE, j) for j in range(len(self.dialogues))]
             + [(self.SRC_INSTRUCT, k) for k in instruct_rows]
+            + [(self.SRC_ASSISTANT, a) for a in range(len(self.assistant_chats))]
         )
 
         keep = [entry for entry in base if _in_val(*entry) == (split == "val")]
+        
         if split == "val":
             self._index = keep
             return
 
-        # Oversample Dolly only after the holdout is complete
-        repeats = max(1, CHAT_DATA_CONFIG.get("dolly_repeat", 1)) - 1
-        self._index = keep + [e for e in keep if e[0] == self.SRC_DOLLY] * repeats
+        # Repeat dolly and assistant chats
+        self._index = keep + [e for e in keep if e[0] == self.SRC_DOLLY] * CHAT_DATA_CONFIG["dolly_repeat"]
+        self._index += [e for e in keep if e[0] == self.SRC_ASSISTANT] * CHAT_DATA_CONFIG["assistant_repeat"]
 
     def __len__(self):
         return len(self._index)
@@ -129,6 +144,9 @@ class ChatDataset(Dataset):
 
         if source == self.SRC_DIALOGUE:
             return {"text": self.dialogues[i]}
+
+        if source == self.SRC_ASSISTANT:
+            return {"text": self.assistant_chats[i]}
 
         if source == self.SRC_INSTRUCT:
             row = self.instruct[i]

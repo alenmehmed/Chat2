@@ -33,13 +33,15 @@ def sample(model : LanguageModel, tokenizer : Tokenizer, prompt : str) -> str:
 
 @torch.no_grad()
 def validate(model : LanguageModel, val_loaders : dict, vocab_size : int):
-    """Mean cross-entropy per supervised token on held-out data and per source"""
+    """Mean cross-entropy validation loss per source"""
 
     model.eval()
+
     total, count, per_source = 0.0, 0, {}
 
     for name, source_loader in val_loaders.items():
         s_total, s_count = 0.0, 0
+
         for x, y in source_loader:
             if x.numel() == 0:
                 continue
@@ -58,8 +60,8 @@ def validate(model : LanguageModel, val_loaders : dict, vocab_size : int):
             ).item()
             s_count += (y != -100).sum().item()
 
-        if s_count:
-            per_source[name] = s_total / s_count
+        per_source[name] = s_total / s_count
+
         total += s_total
         count += s_count
 

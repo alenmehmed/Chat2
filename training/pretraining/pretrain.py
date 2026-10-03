@@ -43,8 +43,6 @@ def pretrain():
     if not PRETRAIN_TOKENS_PATH.exists() or not PRETRAIN_TOKENS_META_PATH.exists():
         raise FileNotFoundError("Packed pretrain tokens not found. Run training/prepare_pretrain_data.py first.")
 
-    PRETRAIN_DIR.mkdir(parents=True, exist_ok=True)
-
     tokenizer = load_tokenizer(TOKENIZER_PATH)
     vocab_size = tokenizer.get_vocab_size()
 
@@ -58,9 +56,8 @@ def pretrain():
         eos_token_id=tokenizer.token_to_id("<EOS>"),
     ).cuda()
 
-    data = PackedTokenDataset(PRETRAIN_TOKENS_PATH, PRETRAIN_TOKENS_META_PATH, MODEL_CONFIG["context_length"])
     loader = DataLoader(
-        data,
+        dataset=PackedTokenDataset(PRETRAIN_TOKENS_PATH, PRETRAIN_TOKENS_META_PATH, MODEL_CONFIG["context_length"]),
         batch_size=PRETRAIN_CONFIG["batch_size"],
         shuffle=True,
         num_workers=PRETRAIN_CONFIG["num_workers"],
@@ -78,7 +75,9 @@ def pretrain():
     decay    = [p for p in model.parameters() if p.dim() >= 2]
     no_decay = [p for p in model.parameters() if p.dim() < 2]   # biases, LayerNorm
     
-    optimizer = AdamW([{"params": decay, "weight_decay": 0.01}, {"params": no_decay, "weight_decay": 0.0}], lr=PRETRAIN_CONFIG["lr"], betas=(0.9, 0.95))
+    optimizer = AdamW([{"params": decay, "weight_decay": PRETRAIN_CONFIG["weight_decay"]}, 
+                       {"params": no_decay, "weight_decay": 0.0}], 
+                       lr=PRETRAIN_CONFIG["lr"], betas=(0.9, 0.95))
     scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
 
     accum_steps = PRETRAIN_CONFIG["grad_accum_steps"]
@@ -100,7 +99,6 @@ def pretrain():
                 loss = F.cross_entropy(
                     logits.view(-1, vocab_size),
                     target_tensor.view(-1),
-                    label_smoothing=PRETRAIN_CONFIG["label_smoothing"],
                 ) / accum_steps
 
             scaler.scale(loss).backward()
